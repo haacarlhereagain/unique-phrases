@@ -50,6 +50,7 @@ contract MessagesOwnershipHashed {
     }
 
     function revokeMessage(bytes32 hash_, bytes32 claimHash) external onlyAdmin {
+        require(!claimHashExists(claimHash), "Claim has already used");
         MessageInfo storage info = messages[hash_];
 
         require(info.status == MessageStatus.ConfirmationAwaiting, "Invalid status");
@@ -64,8 +65,9 @@ contract MessagesOwnershipHashed {
     function addMessage(
         bytes32 hash_,
         bytes32 claimHash,
-        string memory messageHash
+        string calldata messageHash
     ) external onlyAdmin {
+        require(!claimHashExists(claimHash), "Claim has already used");
         require(bytes(messageHash).length > 0, "Message cannot be empty");
         require(!messageExists(hash_), "Message already exists");
 
@@ -157,7 +159,7 @@ contract MessagesOwnershipHashed {
         return claimHashes[claimHash];
     }
 
-    function markClaimHashAsUsed(bytes32 claimHash) private onlyAdmin {
+    function markClaimHashAsUsed(bytes32 claimHash) private {
         claimHashes[claimHash] = true;
     }
 }
