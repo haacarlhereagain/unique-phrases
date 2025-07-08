@@ -137,6 +137,6 @@ contract MessagesOwnershipHashed {
     }
 
     function messageExists(bytes32 hash_) public view returns (bool) {
-        return messages[hash_].exists == true;
+        return messages[hash_].exists;
     }
 }
