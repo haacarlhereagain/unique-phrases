@@ -5,7 +5,7 @@ contract MessagesOwnershipHashed {
     enum MessageStatus {
         Created,
         ConfirmationAwaiting,
-        Confirmed
+        Confirmed,
     }
 
     struct MessageInfo {
@@ -15,7 +15,7 @@ contract MessagesOwnershipHashed {
         uint confirmationDelaySeconds;
         uint confirmationPeriodSeconds;
         bool exists;
-        string message;
+        string messageHash;
     }
 
     mapping(bytes32 => MessageInfo) private messages;
@@ -24,11 +24,11 @@ contract MessagesOwnershipHashed {
     address public admin;
 
     // --- Events ---
-    event MessageAdded(bytes32 indexed messageHash, address owner, MessageStatus status, string message);
-    event OwnershipConfirmed(bytes32 indexed messageHash, address confirmedOwner);
-    event OwnershipTransferred(bytes32 indexed messageHash, address oldOwner, address newOwner);
-    event MessageRevertedToAdmin(bytes32 indexed messageHash);
-    event MessageDeleted(bytes32 indexed messageHash, address by);
+    event MessageAdded(bytes32 indexed hash_, address owner, MessageStatus status, string messageHash);
+    event OwnershipConfirmed(bytes32 indexed hash_, address confirmedOwner);
+    event OwnershipTransferred(bytes32 indexed hash_, address oldOwner, address newOwner);
+    event MessageRevertedToAdmin(bytes32 indexed hash_);
+    event MessageDeleted(bytes32 indexed hash_, address by);
     event AdminChanged(address oldAdmin, address newAdmin);
 
     // --- Modifiers ---
@@ -37,8 +37,8 @@ contract MessagesOwnershipHashed {
         _;
     }
 
-    modifier onlyOwner(bytes32 messageHash) {
-        require(messages[messageHash].owner == msg.sender, "Only owner can call");
+    modifier onlyOwner(bytes32 hash_) {
+        require(messages[hash_].owner == msg.sender, "Only owner can call");
         _;
     }
 
@@ -54,37 +54,36 @@ contract MessagesOwnershipHashed {
     }
 
     function createMessage(
-        bytes32 messageHash,
+        bytes32 hash_,
         bytes32 claimHash,
         uint confirmationDelaySeconds,
         uint confirmationPeriodSeconds,
-        string memory message
+        string memory messageHash
     ) external onlyAdmin {
-        require(bytes(message).length > 0, "Message cannot be empty");
-        require(messageHash != bytes32(0), "Invalid message hash");
-        require(!messageExists(messageHash), "Message already exists");
+        require(bytes(messageHash).length > 0, "Message cannot be empty");
+        require(!messageExists(hash_), "Message already exists");
 
-        messages[messageHash] = MessageInfo({
+        messages[hash_] = MessageInfo({
             owner: admin,
             status: MessageStatus.Created,
             confirmationDelaySeconds: confirmationDelaySeconds,
             confirmationPeriodSeconds: confirmationPeriodSeconds,
             claimHash: claimHash,
             exists: true,
-            message: message
+            messageHash: messageHash
         });
 
-        emit MessageAdded(messageHash, admin, MessageStatus.Created, message);
+        emit MessageAdded(hash_, admin, MessageStatus.Created, messageHash);
     }
 
-    function confirm(bytes32 messageHash, address newOwner) external onlyAdmin {
-        require(messageExists(messageHash), "Message does not exist");
+    function confirm(bytes32 hash_, address newOwner) external onlyAdmin {
+        require(messageExists(hash_), "Message does not exist");
 
-        MessageInfo storage info = messages[messageHash];
+        MessageInfo storage info = messages[hash_];
 
         require(info.status == MessageStatus.ConfirmationAwaiting, "Not in awaiting confirmation stage");
 
-        uint256 startedAt = confirmationStartedAt[messageHash];
+        uint256 startedAt = confirmationStartedAt[hash_];
         require(startedAt > 0, "Confirmation not started");
 
         uint256 delayEnd = startedAt + info.confirmationDelaySeconds;
@@ -98,18 +97,18 @@ contract MessagesOwnershipHashed {
         info.confirmationPeriodSeconds = 0;
         info.owner = newOwner;
         info.claimHash = 0;
-        delete confirmationStartedAt[messageHash];
+        delete confirmationStartedAt[hash_];
 
-        emit OwnershipConfirmed(messageHash, newOwner);
+        emit OwnershipConfirmed(hash_, newOwner);
     }
 
-    function revertToAdminIfExpiredBatch(bytes32[] calldata messageHashes) external onlyAdmin {
-        for (uint i = 0; i < messageHashes.length; i++) {
-            bytes32 messageHash = messageHashes[i];
-            MessageInfo storage info = messages[messageHash];
+    function revertToAdminIfExpiredBatch(bytes32[] calldata hashes) external onlyAdmin {
+        for (uint i = 0; i < hashes.length; i++) {
+            bytes32 hash_ = hashes[i];
+            MessageInfo storage info = messages[hash_];
 
-            if (info.status == MessageStatus.ConfirmationAwaiting && confirmationStartedAt[messageHash] > 0) {
-                uint256 startedAt = confirmationStartedAt[messageHash];
+            if (info.status == MessageStatus.ConfirmationAwaiting && confirmationStartedAt[hash_] > 0) {
+                uint256 startedAt = confirmationStartedAt[hash_];
                 uint256 expirationTime = startedAt + info.confirmationDelaySeconds + info.confirmationPeriodSeconds;
 
                 if (block.timestamp > expirationTime) {
@@ -119,66 +118,66 @@ contract MessagesOwnershipHashed {
                     info.status = MessageStatus.Created;
                     info.confirmationDelaySeconds = 0;
                     info.confirmationPeriodSeconds = 0;
-                    delete confirmationStartedAt[messageHash];
+                    delete confirmationStartedAt[hash_];
 
-                    emit MessageRevertedToAdmin(messageHash);
-                    emit OwnershipTransferred(messageHash, oldOwner, admin);
+                    emit MessageRevertedToAdmin(hash_);
+                    emit OwnershipTransferred(hash_, oldOwner, admin);
                 }
             }
         }
     }
 
-    function transferOwnershipImmediately(bytes32 messageHash, address newOwner) external onlyOwner(messageHash) {
-        MessageInfo storage info = messages[messageHash];
+    function transferOwnershipImmediately(bytes32 hash_, address newOwner) external onlyOwner(hash_) {
+        MessageInfo storage info = messages[hash_];
 
         address oldOwner = info.owner;
         info.owner = newOwner;
 
-        emit OwnershipTransferred(messageHash, oldOwner, newOwner);
+        emit OwnershipTransferred(hash_, oldOwner, newOwner);
     }
 
-    function changeStatusToAwaitingConfirmation(bytes32 messageHash) external onlyAdmin {
-        require(messageExists(messageHash), "Message does not exist");
+    function changeStatusToAwaitingConfirmation(bytes32 hash_) external onlyAdmin {
+        require(messageExists(hash_), "Message does not exist");
 
-        MessageInfo storage info = messages[messageHash];
+        MessageInfo storage info = messages[hash_];
         require(info.status == MessageStatus.Created, "Status must be Created");
 
         info.status = MessageStatus.ConfirmationAwaiting;
-        confirmationStartedAt[messageHash] = block.timestamp;
+        confirmationStartedAt[hash_] = block.timestamp;
     }
 
-    function deleteMessage(bytes32 messageHash) external onlyAdmin {
-        MessageInfo storage info = messages[messageHash];
+    function deleteMessage(bytes32 hash_) external onlyAdmin {
+        MessageInfo storage info = messages[hash_];
         require(info.owner == admin, "Message owner is not admin");
 
-        delete messages[messageHash];
-        delete confirmationStartedAt[messageHash];
+        delete messages[hash_];
+        delete confirmationStartedAt[hash_];
 
-        emit MessageDeleted(messageHash, msg.sender);
+        emit MessageDeleted(hash_, msg.sender);
     }
 
-    function getMessageInfo(bytes32 messageHash) external view returns (
+    function getMessageInfo(bytes32 hash_) external view returns (
         address owner,
         MessageStatus status,
         uint confirmationDelaySeconds,
         uint confirmationPeriodSeconds,
         uint confirmationStartedTimestamp,
         bytes32 claimHash,
-        string memory message
+        string memory messageHash
     ) {
-        MessageInfo memory info = messages[messageHash];
+        MessageInfo memory info = messages[hash_];
         return (
             info.owner,
             info.status,
             info.confirmationDelaySeconds,
             info.confirmationPeriodSeconds,
-            confirmationStartedAt[messageHash],
+            confirmationStartedAt[hash_],
             info.claimHash,
-            info.message
+            info.messageHash
         );
     }
 
-    function messageExists(bytes32 messageHash) public view returns (bool) {
-        return messages[messageHash].exists == true;
+    function messageExists(bytes32 hash_) public view returns (bool) {
+        return messages[hash_].exists == true;
     }
 }
