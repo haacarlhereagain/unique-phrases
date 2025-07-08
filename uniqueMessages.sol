@@ -13,7 +13,6 @@ contract MessagesOwnershipHashed {
         bytes32 claimHash;
         MessageStatus status;
         uint confirmationDelaySeconds;
-        uint confirmationPeriodSeconds;
         bool exists;
         string messageHash;
     }
@@ -55,8 +54,6 @@ contract MessagesOwnershipHashed {
     function createMessage(
         bytes32 hash_,
         bytes32 claimHash,
-        uint confirmationDelaySeconds,
-        uint confirmationPeriodSeconds,
         string memory messageHash
     ) external onlyAdmin {
         require(bytes(messageHash).length > 0, "Message cannot be empty");
@@ -65,8 +62,7 @@ contract MessagesOwnershipHashed {
         messages[hash_] = MessageInfo({
             owner: admin,
             status: MessageStatus.Created,
-            confirmationDelaySeconds: confirmationDelaySeconds,
-            confirmationPeriodSeconds: confirmationPeriodSeconds,
+            confirmationDelaySeconds: 0,
             claimHash: claimHash,
             exists: true,
             messageHash: messageHash
@@ -86,14 +82,11 @@ contract MessagesOwnershipHashed {
         require(startedAt > 0, "Confirmation not started");
 
         uint256 delayEnd = startedAt + info.confirmationDelaySeconds;
-        uint256 periodEnd = delayEnd + info.confirmationPeriodSeconds;
 
         require(block.timestamp >= delayEnd, "Confirmation delay not passed");
-        require(block.timestamp <= periodEnd, "Confirmation period expired");
 
         info.status = MessageStatus.Confirmed;
         info.confirmationDelaySeconds = 0;
-        info.confirmationPeriodSeconds = 0;
         info.owner = newOwner;
         info.claimHash = 0;
         delete confirmationStartedAt[hash_];
@@ -101,38 +94,17 @@ contract MessagesOwnershipHashed {
         emit OwnershipConfirmed(hash_, newOwner);
     }
 
-    function revertToAdminIfExpiredBatch(bytes32[] calldata hashes) external onlyAdmin {
-        for (uint i = 0; i < hashes.length; i++) {
-            bytes32 hash_ = hashes[i];
-            MessageInfo storage info = messages[hash_];
-
-            if (info.status == MessageStatus.ConfirmationAwaiting && confirmationStartedAt[hash_] > 0) {
-                uint256 startedAt = confirmationStartedAt[hash_];
-                uint256 expirationTime = startedAt + info.confirmationDelaySeconds + info.confirmationPeriodSeconds;
-
-                if (block.timestamp > expirationTime) {
-                    address oldOwner = info.owner;
-
-                    info.owner = admin;
-                    info.status = MessageStatus.Created;
-                    info.confirmationDelaySeconds = 0;
-                    info.confirmationPeriodSeconds = 0;
-                    delete confirmationStartedAt[hash_];
-
-                    emit MessageRevertedToAdmin(hash_);
-                    emit OwnershipTransferred(hash_, oldOwner, admin);
-                }
-            }
-        }
-    }
-
-    function changeStatusToAwaitingConfirmation(bytes32 hash_) external onlyAdmin {
+    function changeStatusToAwaitingConfirmation(
+        bytes32 hash_,
+        uint confirmationDelaySeconds
+    ) external onlyAdmin {
         require(messageExists(hash_), "Message does not exist");
 
         MessageInfo storage info = messages[hash_];
         require(info.status == MessageStatus.Created, "Status must be Created");
 
         info.status = MessageStatus.ConfirmationAwaiting;
+        info.confirmationDelaySeconds = confirmationDelaySeconds;
         confirmationStartedAt[hash_] = block.timestamp;
     }
 
@@ -149,7 +121,6 @@ contract MessagesOwnershipHashed {
         address owner,
         MessageStatus status,
         uint confirmationDelaySeconds,
-        uint confirmationPeriodSeconds,
         uint confirmationStartedTimestamp,
         bytes32 claimHash,
         string memory messageHash
@@ -159,7 +130,6 @@ contract MessagesOwnershipHashed {
             info.owner,
             info.status,
             info.confirmationDelaySeconds,
-            info.confirmationPeriodSeconds,
             confirmationStartedAt[hash_],
             info.claimHash,
             info.messageHash
