@@ -19,17 +19,15 @@ contract MessagesOwnershipHashed {
 
     mapping(bytes32 => MessageInfo) private messages;
     mapping(bytes32 => uint256) private confirmationStartedAt;
+    mapping(bytes32 => bool) private claimHashes; 
 
     address public admin;
 
-    // --- Events ---
     event MessageAdded(bytes32 indexed hash_, address owner, MessageStatus status, string messageHash);
     event OwnershipConfirmed(bytes32 indexed hash_, address confirmedOwner);
     event OwnershipTransferred(bytes32 indexed hash_, address oldOwner, address newOwner);
-    event MessageRevertedToAdmin(bytes32 indexed hash_);
     event AdminChanged(address oldAdmin, address newAdmin);
 
-    // --- Modifiers ---
     modifier onlyAdmin() {
         require(msg.sender == admin, "Only admin can call");
         _;
@@ -51,7 +49,7 @@ contract MessagesOwnershipHashed {
         emit AdminChanged(oldAdmin, newAdmin);
     }
 
-    function createMessage(
+    function addMessage(
         bytes32 hash_,
         bytes32 claimHash,
         string memory messageHash
@@ -67,6 +65,8 @@ contract MessagesOwnershipHashed {
             exists: true,
             messageHash: messageHash
         });
+
+        createClaimHash(claimHash);
 
         emit MessageAdded(hash_, admin, MessageStatus.Created, messageHash);
     }
@@ -126,6 +126,7 @@ contract MessagesOwnershipHashed {
         string memory messageHash
     ) {
         MessageInfo memory info = messages[hash_];
+
         return (
             info.owner,
             info.status,
@@ -138,5 +139,13 @@ contract MessagesOwnershipHashed {
 
     function messageExists(bytes32 hash_) public view returns (bool) {
         return messages[hash_].exists;
+    }
+
+    function claimHashExists(bytes32 claimHash) public view returns (bool) {
+        return claimHashes[claimHash];
+    }
+
+    function createClaimHash(bytes32 claimHash) private onlyAdmin {
+        claimHashes[claimHash] = true;
     }
 }
