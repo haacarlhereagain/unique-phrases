@@ -5,7 +5,7 @@ contract MessagesOwnershipHashed {
     enum MessageStatus {
         Created,
         ConfirmationAwaiting,
-        Confirmed,
+        Confirmed
     }
 
     struct MessageInfo {
@@ -28,7 +28,6 @@ contract MessagesOwnershipHashed {
     event OwnershipConfirmed(bytes32 indexed hash_, address confirmedOwner);
     event OwnershipTransferred(bytes32 indexed hash_, address oldOwner, address newOwner);
     event MessageRevertedToAdmin(bytes32 indexed hash_);
-    event MessageDeleted(bytes32 indexed hash_, address by);
     event AdminChanged(address oldAdmin, address newAdmin);
 
     // --- Modifiers ---
@@ -127,15 +126,6 @@ contract MessagesOwnershipHashed {
         }
     }
 
-    function transferOwnershipImmediately(bytes32 hash_, address newOwner) external onlyOwner(hash_) {
-        MessageInfo storage info = messages[hash_];
-
-        address oldOwner = info.owner;
-        info.owner = newOwner;
-
-        emit OwnershipTransferred(hash_, oldOwner, newOwner);
-    }
-
     function changeStatusToAwaitingConfirmation(bytes32 hash_) external onlyAdmin {
         require(messageExists(hash_), "Message does not exist");
 
@@ -146,14 +136,13 @@ contract MessagesOwnershipHashed {
         confirmationStartedAt[hash_] = block.timestamp;
     }
 
-    function deleteMessage(bytes32 hash_) external onlyAdmin {
+    function transferOwnershipImmediately(bytes32 hash_, address newOwner) external onlyOwner(hash_) {
         MessageInfo storage info = messages[hash_];
-        require(info.owner == admin, "Message owner is not admin");
 
-        delete messages[hash_];
-        delete confirmationStartedAt[hash_];
+        address oldOwner = info.owner;
+        info.owner = newOwner;
 
-        emit MessageDeleted(hash_, msg.sender);
+        emit OwnershipTransferred(hash_, oldOwner, newOwner);
     }
 
     function getMessageInfo(bytes32 hash_) external view returns (
