@@ -49,6 +49,18 @@ contract MessagesOwnershipHashed {
         emit AdminChanged(oldAdmin, newAdmin);
     }
 
+    function revokeMessage(bytes32 hash_, bytes32 claimHash) external onlyAdmin {
+        MessageInfo storage info = messages[hash_];
+
+        require(info.status == MessageStatus.ConfirmationAwaiting, "Invalid status");
+
+        info.status = MessageStatus.Created;
+        info.claimHash = claimHash;
+        info.confirmationDelaySeconds = 0;
+
+        markClaimHashAsUsed(claimHash);
+    }
+
     function addMessage(
         bytes32 hash_,
         bytes32 claimHash,
@@ -66,7 +78,7 @@ contract MessagesOwnershipHashed {
             messageHash: messageHash
         });
 
-        createClaimHash(claimHash);
+        markClaimHashAsUsed(claimHash);
 
         emit MessageAdded(hash_, admin, MessageStatus.Created, messageHash);
     }
@@ -145,7 +157,7 @@ contract MessagesOwnershipHashed {
         return claimHashes[claimHash];
     }
 
-    function createClaimHash(bytes32 claimHash) private onlyAdmin {
+    function markClaimHashAsUsed(bytes32 claimHash) private onlyAdmin {
         claimHashes[claimHash] = true;
     }
 }
