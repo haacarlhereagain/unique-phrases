@@ -15,7 +15,7 @@ contract MessagesOwnershipHashed {
         uint confirmationDelaySeconds;
         bool exists;
         string messageHash;
-        bool generated;
+        bool synthetic;
     }
 
     mapping(bytes32 => MessageInfo) private messages;
@@ -67,7 +67,7 @@ contract MessagesOwnershipHashed {
         bytes32 hash_,
         bytes32 claimHash,
         string calldata messageHash,
-        bool generated
+        bool synthetic
     ) external onlyAdmin {
         require(!claimHashExists(claimHash), "Claim has already used");
         require(bytes(messageHash).length > 0, "Message cannot be empty");
@@ -80,7 +80,7 @@ contract MessagesOwnershipHashed {
             claimHash: claimHash,
             exists: true,
             messageHash: messageHash,
-            generated: generated
+            synthetic: synthetic
         });
 
         markClaimHashAsUsed(claimHash);
@@ -166,8 +166,8 @@ contract MessagesOwnershipHashed {
         claimHashes[claimHash] = true;
     }
 
-    function isGenerated(bytes32 hash_) external view returns (bool) {
+    function isSynthetic(bytes32 hash_) external view returns (bool) {
         require(messageExists(hash_), "Message does not exist");
-        return messages[hash_].generated;
+        return messages[hash_].synthetic;
     }
 }
