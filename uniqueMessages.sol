@@ -10,22 +10,27 @@ contract MessagesOwnershipHashed {
 
     struct MessageInfo {
         address owner;
-        bytes32 claimHash;
         MessageStatus status;
         uint confirmationDelaySeconds;
         bool exists;
-        string messageHash;
+        string messageEncrypted;
+        bytes32 key;
+    }
+
+    struct KeyInfo {
+        bool exists;
+        bytes32 messageId;
     }
 
     mapping(bytes32 => MessageInfo) private messages;
     mapping(bytes32 => uint256) private confirmationStartedAt;
-    mapping(bytes32 => bool) private claimHashes; 
+    mapping(bytes32 => KeyInfo) private keys; 
 
     address public admin;
 
-    event MessageAdded(bytes32 indexed hash_, address owner, MessageStatus status, string messageHash);
-    event OwnershipConfirmed(bytes32 indexed hash_, address confirmedOwner);
-    event OwnershipTransferred(bytes32 indexed hash_, address oldOwner, address newOwner);
+    event MessageAdded(bytes32 indexed messageId, address owner, MessageStatus status, string messageEncrypted);
+    event OwnershipConfirmed(bytes32 indexed messageId, address confirmedOwner);
+    event OwnershipTransferred(bytes32 indexed messageId, address oldOwner, address newOwner);
     event AdminChanged(address oldAdmin, address newAdmin);
 
     modifier onlyAdmin() {
@@ -33,8 +38,8 @@ contract MessagesOwnershipHashed {
         _;
     }
 
-    modifier onlyOwner(bytes32 hash_) {
-        require(messages[hash_].owner == msg.sender, "Only owner can call");
+    modifier onlyOwner(bytes32 messageId) {
+        require(messages[messageId].owner == msg.sender, "Only owner can call");
         _;
     }
 
@@ -49,117 +54,138 @@ contract MessagesOwnershipHashed {
         emit AdminChanged(oldAdmin, newAdmin);
     }
 
-    function revokeMessage(bytes32 hash_, bytes32 claimHash) external onlyAdmin {
-        require(!claimHashExists(claimHash), "Claim has already used");
-        MessageInfo storage info = messages[hash_];
+    function revokeMessage(bytes32 messageId, bytes32 key) external onlyAdmin {
+        require(!keyExists(key), "Key has already used");
+        MessageInfo storage messageInfo = messages[messageId];
 
-        require(info.status == MessageStatus.ConfirmationAwaiting, "Invalid status");
+        require(messageInfo.status == MessageStatus.ConfirmationAwaiting, "Invalid status");
 
-        info.status = MessageStatus.Created;
-        info.claimHash = claimHash;
-        info.confirmationDelaySeconds = 0;
+        messageInfo.status = MessageStatus.Created;
+        messageInfo.confirmationDelaySeconds = 0;
 
-        markClaimHashAsUsed(claimHash);
+        attachKeyToMessage(key, messageId);
     }
 
     function addMessage(
-        bytes32 hash_,
-        bytes32 claimHash,
-        string calldata messageHash
+        bytes32 messageId,
+        bytes32 key,
+        string calldata messageEncrypted
     ) external onlyAdmin {
-        require(!claimHashExists(claimHash), "Claim has already used");
-        require(bytes(messageHash).length > 0, "Message cannot be empty");
-        require(!messageExists(hash_), "Message already exists");
+        require(!keyExists(key), "Key has already used");
+        require(bytes(messageEncrypted).length > 0, "Message cannot be empty");
+        require(!messageExists(messageId), "Message already exists");
 
-        messages[hash_] = MessageInfo({
+        messages[messageId] = MessageInfo({
             owner: admin,
             status: MessageStatus.Created,
             confirmationDelaySeconds: 0,
-            claimHash: claimHash,
             exists: true,
-            messageHash: messageHash
+            messageEncrypted: messageEncrypted,
+            key: key
         });
 
-        markClaimHashAsUsed(claimHash);
+        attachKeyToMessage(key, messageId);
 
-        emit MessageAdded(hash_, admin, MessageStatus.Created, messageHash);
+        emit MessageAdded(messageId, admin, MessageStatus.Created, messageEncrypted);
     }
 
-    function confirm(bytes32 hash_, address newOwner) external onlyAdmin {
-        require(messageExists(hash_), "Message does not exist");
+    function confirm(bytes32 key, address newOwner) external onlyAdmin {
+        require(keyExists(key), "Key does not exist");
 
-        MessageInfo storage info = messages[hash_];
+        KeyInfo storage keyInfo = keys[key];
 
-        require(info.status == MessageStatus.ConfirmationAwaiting, "Not in awaiting confirmation stage");
+        require(messageExists(keyInfo.messageId), "Message does not exist");
 
-        uint256 startedAt = confirmationStartedAt[hash_];
+        MessageInfo storage messageInfo = messages[keyInfo.messageId];
+
+        require(messageInfo.key == key, "Invalid key");
+
+        require(messageInfo.status == MessageStatus.ConfirmationAwaiting, "Not in awaiting confirmation stage");
+
+        uint256 startedAt = confirmationStartedAt[keyInfo.messageId];
         require(startedAt > 0, "Confirmation not started");
 
-        uint256 delayEnd = startedAt + info.confirmationDelaySeconds;
+        uint256 delayEnd = startedAt + messageInfo.confirmationDelaySeconds;
 
         require(block.timestamp >= delayEnd, "Confirmation delay not passed");
 
-        info.status = MessageStatus.Confirmed;
-        info.confirmationDelaySeconds = 0;
-        info.owner = newOwner;
-        info.claimHash = 0;
-        delete confirmationStartedAt[hash_];
+        messageInfo.status = MessageStatus.Confirmed;
+        messageInfo.confirmationDelaySeconds = 0;
+        messageInfo.owner = newOwner;
+        delete confirmationStartedAt[keyInfo.messageId];
 
-        emit OwnershipConfirmed(hash_, newOwner);
+        emit OwnershipConfirmed(keyInfo.messageId, newOwner);
     }
 
     function changeStatusToAwaitingConfirmation(
-        bytes32 hash_,
+        bytes32 key,
         uint confirmationDelaySeconds
     ) external onlyAdmin {
-        require(messageExists(hash_), "Message does not exist");
+        require(keyExists(key), "Key does not exist");
 
-        MessageInfo storage info = messages[hash_];
-        require(info.status == MessageStatus.Created, "Status must be Created");
+        KeyInfo storage keyInfo = keys[key];
 
-        info.status = MessageStatus.ConfirmationAwaiting;
-        info.confirmationDelaySeconds = confirmationDelaySeconds;
-        confirmationStartedAt[hash_] = block.timestamp;
+        require(messageExists(keyInfo.messageId), "Message does not exist");
+
+        MessageInfo storage messageInfo = messages[keyInfo.messageId];
+
+        require(messageInfo.key == key, "Invalid key");
+
+        require(messageInfo.status == MessageStatus.Created, "Status must be Created");
+
+        messageInfo.status = MessageStatus.ConfirmationAwaiting;
+        messageInfo.confirmationDelaySeconds = confirmationDelaySeconds;
+        confirmationStartedAt[keyInfo.messageId] = block.timestamp;
     }
 
-    function transferOwnershipImmediately(bytes32 hash_, address newOwner) external onlyOwner(hash_) {
-        MessageInfo storage info = messages[hash_];
+    function transferOwnershipImmediately(bytes32 messageId, address newOwner) external onlyOwner(messageId) {
+        MessageInfo storage messageInfo = messages[messageId];
 
-        address oldOwner = info.owner;
-        info.owner = newOwner;
+        address oldOwner = messageInfo.owner;
+        messageInfo.owner = newOwner;
 
-        emit OwnershipTransferred(hash_, oldOwner, newOwner);
+        emit OwnershipTransferred(messageId, oldOwner, newOwner);
     }
 
-    function getMessageInfo(bytes32 hash_) external view returns (
+    function getMessageInfo(bytes32 messageId) external view returns (
         address owner,
         MessageStatus status,
         uint confirmationDelaySeconds,
         uint confirmationStartedTimestamp,
-        bytes32 claimHash,
-        string memory messageHash
+        string memory messageEncrypted
     ) {
-        MessageInfo memory info = messages[hash_];
+        MessageInfo memory messageInfo = messages[messageId];
 
         return (
-            info.owner,
-            info.status,
-            info.confirmationDelaySeconds,
-            confirmationStartedAt[hash_],
-            info.claimHash,
-            info.messageHash
+            messageInfo.owner,
+            messageInfo.status,
+            messageInfo.confirmationDelaySeconds,
+            confirmationStartedAt[messageId],
+            messageInfo.messageEncrypted
         );
     }
 
-    function messageExists(bytes32 hash_) public view returns (bool) {
-        return messages[hash_].exists;
+    function messageExists(bytes32 messageId) public view returns (bool) {
+        return messages[messageId].exists;
     }
 
-    function claimHashExists(bytes32 claimHash) public view returns (bool) {
-        return claimHashes[claimHash];
+    function keyExists(bytes32 key) public view returns (bool) {
+        KeyInfo storage keyInfo = keys[key];
+
+        return keyInfo.exists;
     }
 
-    function markClaimHashAsUsed(bytes32 claimHash) private {
-        claimHashes[claimHash] = true;
+    function attachKeyToMessage(bytes32 key, bytes32 messageId) private {
+        require(messageExists(messageId), "Message does not exist");
+        require(!keyExists(key), "Key has already used");
+
+        MessageInfo storage messageInfo = messages[messageId];
+
+        messageInfo.key = key;
+
+        keys[key] = KeyInfo({
+            exists: true,
+            messageId: messageId
+        });
     }
 }
